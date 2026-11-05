@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from collections import defaultdict, deque
 from pathlib import Path
 
 from blastradius import __version__
+from blastradius.cache import StaticIndexCache, static_cache_key
 from blastradius.coverage.profile import load_profile, validate_profile
 from blastradius.errors import BlastRadiusError
 from blastradius.models import (
@@ -28,6 +30,7 @@ from blastradius.static.changes import map_changes
 from blastradius.vcs.git import (
     changed_paths,
     diff_files,
+    git_path,
     list_python_files,
     read_file,
     resolve_revision,
@@ -41,6 +44,26 @@ def _sources(repo: Path, revision: str) -> dict[str, str]:
         if source is not None:
             result[path] = source
     return result
+
+
+def _index_for_revision(
+    repo: Path,
+    identity: RevisionIdentity,
+    cache: StaticIndexCache | None,
+) -> tuple[StaticIndex, str, str | None]:
+    if cache is None:
+        return build_index(identity.sha, _sources(repo, identity.sha)), "disabled", None
+    key = static_cache_key(identity)
+    try:
+        cached, state = cache.load(key, identity.sha)
+        if cached is not None:
+            return cached, state, None
+        rebuilt = build_index(identity.sha, _sources(repo, identity.sha))
+        cache.store(key, identity.sha, rebuilt)
+        return rebuilt, "corrupt_rebuilt" if state == "corrupt" else "miss", None
+    except (OSError, sqlite3.Error) as exc:
+        rebuilt = build_index(identity.sha, _sources(repo, identity.sha))
+        return rebuilt, "disabled", f"Static cache disabled after storage error: {exc}"
 
 
 def _reverse_impact(
@@ -152,7 +175,7 @@ def _select_tests(
         return (
             TestSelection(
                 mode,
-                [],
+                sorted(changed_test_ids),
                 sorted(changed_test_ids),
                 {
                     test_id: ["new or changed test discovered at the head revision"]
@@ -168,7 +191,7 @@ def _select_tests(
 
     profile = load_profile(coverage_path)
     validate_profile(profile, base_identity)
-    available = sorted(profile.test_lines)
+    available = sorted(set(profile.test_lines) | changed_test_ids)
     impact_depth: dict[str, int] = {}
     for item in impact:
         depth = max(len(item.dependency_path) - 1, 0)
@@ -387,6 +410,9 @@ def analyze(
     coverage_path: Path | None,
     runtime_path: Path | None,
     mode: str,
+    *,
+    use_cache: bool = True,
+    cache_file: Path | None = None,
 ) -> AnalysisReport:
     started = time.perf_counter()
     if mode not in {"conservative", "balanced", "aggressive"}:
@@ -394,8 +420,17 @@ def analyze(
     base_identity = resolve_revision(repo, base)
     head_identity = resolve_revision(repo, head)
     resolved_ms = (time.perf_counter() - started) * 1000
-    base_index = build_index(base_identity.sha, _sources(repo, base_identity.sha))
-    head_index = build_index(head_identity.sha, _sources(repo, head_identity.sha))
+    cache = (
+        StaticIndexCache(cache_file or git_path(repo, "blastradius/cache.sqlite3"))
+        if use_cache
+        else None
+    )
+    base_index, base_cache_state, base_cache_warning = _index_for_revision(
+        repo, base_identity, cache
+    )
+    head_index, head_cache_state, head_cache_warning = _index_for_revision(
+        repo, head_identity, cache
+    )
     indexed_ms = (time.perf_counter() - started) * 1000 - resolved_ms
     diffs = diff_files(repo, base_identity.sha, head_identity.sha)
     changes = map_changes(diffs, base_index, head_index)
@@ -444,6 +479,9 @@ def analyze(
         modified_paths,
         changed_test_ids,
         unsupported_boundary,
+    )
+    warnings.extend(
+        warning for warning in (base_cache_warning, head_cache_warning) if warning is not None
     )
     if runtime_path is None:
         warnings.append("Runtime evidence was not supplied; static possibilities remain included.")
@@ -498,4 +536,5 @@ def analyze(
             "static_index": round(indexed_ms, 2),
             "total": round(total_ms, 2),
         },
+        f"base={base_cache_state};head={head_cache_state}",
     )
