@@ -33,14 +33,20 @@ def write_markdown(report: AnalysisReport, output: Path) -> None:
         "",
     ]
     if report.changed_symbols:
-        lines.extend(["| Change | Symbol | Lines |", "|---|---|---|"])
+        lines.extend(
+            [
+                "| Change | Symbol | Lines | Match confidence | Ambiguity |",
+                "|---|---|---|---:|---|",
+            ]
+        )
         for change in report.changed_symbols:
             symbol = change.head or change.base
             assert symbol is not None
             changed_lines = change.head_lines or change.base_lines
             lines.append(
                 f"| {change.change.value} | `{_escape(symbol.id.key)}` | "
-                f"{_escape(', '.join(map(str, changed_lines)) or 'structural')} |"
+                f"{_escape(', '.join(map(str, changed_lines)) or 'structural')} | "
+                f"{change.match_confidence:.2f} | {_escape(change.ambiguity or '')} |"
             )
     else:
         lines.append("No Python symbol changes were identified.")

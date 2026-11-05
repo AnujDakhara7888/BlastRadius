@@ -56,7 +56,9 @@ class Symbol:
     id: SymbolId
     start_line: int
     end_line: int
+    body_start_line: int
     source_hash: str
+    structure_hash: str
     module: str
     parent_scope: str | None = None
 

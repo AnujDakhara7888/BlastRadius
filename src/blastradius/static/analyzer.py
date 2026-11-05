@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import copy
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -43,6 +44,14 @@ def _source_hash(source: str, node: ast.AST) -> str:
     return hashlib.sha256(segment.encode()).hexdigest()
 
 
+def _structure_hash(node: ast.AST) -> str:
+    normalized = copy.deepcopy(node)
+    if isinstance(normalized, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        normalized.name = "<symbol>"
+    payload = ast.dump(normalized, annotate_fields=True, include_attributes=False)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 class _SymbolVisitor(ast.NodeVisitor):
     def __init__(self, revision: str, path: str, source: str) -> None:
         self.revision = revision
@@ -70,7 +79,9 @@ class _SymbolVisitor(ast.NodeVisitor):
             SymbolId(self.revision, self.path, qualified, kind, occurrence),
             start,
             node.end_lineno or node.lineno,
+            node.body[0].lineno if node.body else node.lineno,
             _source_hash(self.source, node),
+            _structure_hash(node),
             self.module,
             ".".join(self.scope) or None,
         )
@@ -128,7 +139,9 @@ def symbols_for_source(
         SymbolId(revision, path, "<module>", "module"),
         1,
         max(len(source.splitlines()), 1),
+        1,
         hashlib.sha256(source.encode()).hexdigest(),
+        hashlib.sha256(ast.dump(tree, include_attributes=False).encode()).hexdigest(),
         module_name(path),
     )
     return [module_symbol, *visitor.symbols], [(tree, module_symbol), *visitor.nodes]
