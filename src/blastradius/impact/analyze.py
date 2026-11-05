@@ -359,10 +359,28 @@ def analyze(
         warnings.append(
             "Runtime evidence was valid but no observed edges mapped to static symbols."
         )
-    unresolved = len(base_index.unresolved_calls) + len(head_index.unresolved_calls)
-    if unresolved:
-        warnings.append(f"Static analysis could not resolve {unresolved} call site(s).")
-    risk = _risk(changes, impact, selection, unresolved, runtime_path is not None)
+    unresolved_sites = sorted(set(base_index.unresolved_calls) | set(head_index.unresolved_calls))
+    uncertainty_sites = sorted(
+        set(base_index.uncertainty_sites) | set(head_index.uncertainty_sites)
+    )
+    if unresolved_sites:
+        warnings.append(f"Static analysis could not resolve {len(unresolved_sites)} call site(s).")
+    if uncertainty_sites:
+        warnings.append(
+            f"Static analysis recorded {len(uncertainty_sites)} explicit uncertainty site(s)."
+        )
+        warnings.extend(f"Static uncertainty: {site}" for site in uncertainty_sites[:20])
+        if len(uncertainty_sites) > 20:
+            warnings.append(
+                f"Static uncertainty: {len(uncertainty_sites) - 20} additional site(s) omitted."
+            )
+    risk = _risk(
+        changes,
+        impact,
+        selection,
+        len(uncertainty_sites),
+        runtime_path is not None,
+    )
     total_ms = (time.perf_counter() - started) * 1000
     return AnalysisReport(
         SCHEMA_VERSION,

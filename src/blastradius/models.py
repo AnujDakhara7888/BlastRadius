@@ -20,6 +20,8 @@ class ChangeKind(StrEnum):
 class EdgeKind(StrEnum):
     CALL = "call"
     IMPORT = "import"
+    INHERITANCE = "inheritance"
+    DECORATOR = "decorator"
     RUNTIME_CALL = "runtime_call"
 
 
