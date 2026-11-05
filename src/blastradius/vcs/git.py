@@ -119,3 +119,9 @@ def changed_paths(repo: Path, base: str, head: str) -> set[str]:
     """Return every changed path, including non-Python policy boundaries."""
     output = _git(repo, "diff", "--name-only", "--find-renames", base, head)
     return {line.strip() for line in output.splitlines() if line.strip()}
+
+
+def git_path(repo: Path, name: str) -> Path:
+    """Resolve a Git-owned path correctly for normal and linked worktrees."""
+    value = Path(_git(repo, "rev-parse", "--git-path", name).strip())
+    return value if value.is_absolute() else (repo / value).resolve()

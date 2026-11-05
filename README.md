@@ -75,6 +75,13 @@ Selection modes are intentionally different:
 Dependency, pytest configuration, and shared-fixture changes require a full-suite fallback in all
 three modes.
 
+Static indexes are cached in a Git-owned SQLite database resolved with `git rev-parse --git-path`,
+so normal and linked worktrees do not assume that `.git` is a directory. Keys include repository,
+full commit and tree identities, Python implementation/version, tool/schema/analyzer versions, and
+selection-relevant analyzer settings. Reports expose base/head hit or miss state. Corrupt rows are
+deleted and rebuilt; use `--no-cache` to disable persistence or `--cache-file PATH` to override the
+location. Coverage and runtime profiles retain their own stricter revision and environment identity.
+
 ## Implemented scope
 
 - Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.

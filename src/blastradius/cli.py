@@ -37,6 +37,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze_parser.add_argument("--json", type=_path, required=True)
     analyze_parser.add_argument("--markdown", type=_path, required=True)
+    analyze_parser.add_argument(
+        "--cache-file",
+        type=_path,
+        help="override the Git-owned SQLite cache path",
+    )
+    analyze_parser.add_argument(
+        "--no-cache", action="store_true", help="disable persistent static-index caching"
+    )
 
     coverage_parser = commands.add_parser("coverage", help="per-test coverage profiles")
     coverage_commands = coverage_parser.add_subparsers(dest="coverage_command", required=True)
@@ -75,12 +83,15 @@ def run(args: argparse.Namespace) -> int:
             args.coverage,
             args.runtime,
             args.mode,
+            use_cache=not args.no_cache,
+            cache_file=args.cache_file,
         )
         write_json(report, args.json)
         write_markdown(report, args.markdown)
         print(
             f"selected {len(report.selection.selected_tests)}/"
-            f"{len(report.selection.available_tests)} tests; risk={report.risk.score:.2f}/100; "
+            f"{len(report.selection.available_tests)} known tests; "
+            f"risk={report.risk.score:.2f}/100; "
             f"fallback={report.selection.fallback.value}"
         )
         return 0

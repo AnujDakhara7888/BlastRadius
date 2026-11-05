@@ -25,11 +25,12 @@ def write_markdown(report: AnalysisReport, output: Path) -> None:
         f"- Head: `{report.head.sha}`",
         f"- Mode: `{report.mode}`",
         f"- Risk: **{report.risk.score:.2f}/100** ({report.risk.label})",
-        f"- Selected tests: **{len(report.selection.selected_tests)} / "
+        f"- Selected known tests: **{len(report.selection.selected_tests)} / "
         f"{len(report.selection.available_tests)}**",
         f"- Fallback: `{report.selection.fallback.value}`",
         f"- Uncovered obligations: **{len(report.selection.uncovered_obligations)}**",
         f"- Truncated obligations: **{len(report.selection.truncated_obligations)}**",
+        f"- Cache state: `{report.cache_state}`",
         "",
         "## Changed symbols",
         "",

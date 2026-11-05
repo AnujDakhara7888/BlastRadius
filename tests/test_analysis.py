@@ -88,6 +88,21 @@ def test_missing_coverage_is_explicit_full_suite_fallback(
     assert any("Coverage evidence is missing" in item for item in report.warnings)
 
 
+def test_missing_coverage_counts_changed_tests_as_known(
+    repo_factory: Callable[[dict[str, str]], Path],
+) -> None:
+    repo = repo_factory({"tests/test_existing.py": "def test_existing():\n    assert True\n"})
+    base = git(repo, "rev-parse", "HEAD")
+    test_path = repo / "tests" / "test_new.py"
+    test_path.write_text("def test_new_behavior():\n    assert True\n")
+    git(repo, "add", "tests/test_new.py")
+    git(repo, "commit", "-q", "-m", "add test")
+    report = analyze(repo, base, "HEAD", None, None, "conservative")
+    expected = ["tests/test_new.py::test_new_behavior"]
+    assert report.selection.available_tests == expected
+    assert report.selection.selected_tests == expected
+
+
 def test_stale_profile_is_rejected(
     repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
 ) -> None:
@@ -146,6 +161,7 @@ def test_new_test_is_included_even_when_absent_from_base_profile(
     head = git(repo, "rev-parse", "HEAD")
     report = analyze(repo, base, head, profile, None, "conservative")
     assert "tests/test_new.py::test_new_behavior" in report.selection.selected_tests
+    assert "tests/test_new.py::test_new_behavior" in report.selection.available_tests
 
 
 def test_renamed_function_keeps_base_dependents_in_impact_and_selection(
