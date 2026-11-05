@@ -206,6 +206,41 @@ class ReplayReport:
     warnings: list[str]
 
 
+@dataclass(frozen=True, slots=True)
+class MutantSpec:
+    mutant_id: str
+    revision: str
+    operator: str
+    path: str
+    start_line: int
+    start_column: int
+    end_line: int
+    end_column: int
+    byte_start: int
+    byte_end: int
+    original: str
+    replacement: str
+    source_hash: str
+    mutated_source_hash: str
+    seed: int
+    validity: str = "valid"
+
+
+@dataclass(slots=True)
+class MutantGenerationReport:
+    schema_version: str
+    generator_version: str
+    base: RevisionIdentity
+    head: RevisionIdentity
+    seed: int
+    max_mutants: int
+    changed_regions: dict[str, list[int]]
+    total_valid_candidates: int
+    truncated_candidates: int
+    mutants: list[MutantSpec]
+    warnings: list[str]
+
+
 def to_primitive(value: Any) -> Any:
     """Convert nested contracts into stable JSON-compatible primitives."""
     if hasattr(value, "__dataclass_fields__"):
