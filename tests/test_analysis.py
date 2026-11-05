@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+from conftest import git
+
+from blastradius.errors import BlastRadiusError
+from blastradius.impact.analyze import analyze
+from blastradius.models import SCHEMA_VERSION, FallbackState
+from blastradius.vcs.git import resolve_revision
+
+BASE_SOURCE = """\
+def price(value):
+    return round(value, 2)
+
+def checkout(value):
+    return price(value)
+
+def unrelated():
+    return 42
+"""
+
+
+def make_change(repo: Path) -> tuple[str, str]:
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "pkg.py").write_text(BASE_SOURCE.replace("round(value, 2)", "round(value, 1)"))
+    git(repo, "add", "pkg.py")
+    git(repo, "commit", "-q", "-m", "change rounding")
+    return base, git(repo, "rev-parse", "HEAD")
+
+
+def write_profile(repo: Path, base: str, path: Path, *, stale: bool = False) -> None:
+    identity = resolve_revision(repo, base)
+    revision = {
+        "repository": identity.repository,
+        "sha": "0" * 40 if stale else identity.sha,
+        "tree": identity.tree,
+    }
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "revision": revision,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "python": "3.12.0",
+                "coverage_version": "7.10.0",
+                "collection_fingerprint": "fixture",
+                "test_lines": {
+                    "tests/test_pkg.py::test_checkout": {"pkg.py": [1, 2, 4, 5]},
+                    "tests/test_pkg.py::test_unrelated": {"pkg.py": [7, 8]},
+                },
+                "phases": {
+                    "tests/test_pkg.py::test_checkout": ["run"],
+                    "tests/test_pkg.py::test_unrelated": ["run"],
+                },
+                "unmapped_contexts": [],
+            }
+        )
+    )
+
+
+def test_end_to_end_selects_direct_and_dependent_coverage(
+    repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
+) -> None:
+    repo = repo_factory({"pkg.py": BASE_SOURCE})
+    base, head = make_change(repo)
+    profile = tmp_path / "coverage.json"
+    write_profile(repo, base, profile)
+    report = analyze(repo, base, head, profile, None, "conservative")
+    assert report.selection.fallback == FallbackState.NONE
+    assert report.selection.selected_tests == ["tests/test_pkg.py::test_checkout"]
+    affected = {item.affected_symbol for item in report.impact}
+    assert "pkg.py:checkout:function:0" in affected
+    assert report.risk.label.startswith("heuristic")
+    assert 0 <= report.risk.score <= 100
+
+
+def test_missing_coverage_is_explicit_full_suite_fallback(
+    repo_factory: Callable[[dict[str, str]], Path],
+) -> None:
+    repo = repo_factory({"pkg.py": BASE_SOURCE})
+    base, head = make_change(repo)
+    report = analyze(repo, base, head, None, None, "conservative")
+    assert report.selection.fallback == FallbackState.FULL_SUITE
+    assert any("Coverage evidence is missing" in item for item in report.warnings)
+
+
+def test_stale_profile_is_rejected(
+    repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
+) -> None:
+    repo = repo_factory({"pkg.py": BASE_SOURCE})
+    base, head = make_change(repo)
+    profile = tmp_path / "coverage.json"
+    write_profile(repo, base, profile, stale=True)
+    with pytest.raises(BlastRadiusError, match="does not match"):
+        analyze(repo, base, head, profile, None, "conservative")
+
+
+def test_uncovered_obligation_forces_all_available_tests(
+    repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
+) -> None:
+    repo = repo_factory({"pkg.py": BASE_SOURCE})
+    base, head = make_change(repo)
+    profile = tmp_path / "coverage.json"
+    write_profile(repo, base, profile)
+    raw = json.loads(profile.read_text())
+    raw["test_lines"]["tests/test_pkg.py::test_checkout"] = {"pkg.py": [4, 5]}
+    profile.write_text(json.dumps(raw))
+    report = analyze(repo, base, head, profile, None, "conservative")
+    assert report.selection.fallback == FallbackState.FULL_SUITE
+    assert report.selection.selected_tests == sorted(raw["test_lines"])
+
+
+def test_shared_fixture_change_forces_conservative_fallback(
+    repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
+) -> None:
+    repo = repo_factory({"pkg.py": BASE_SOURCE, "tests/conftest.py": "VALUE = 1\n"})
+    base = git(repo, "rev-parse", "HEAD")
+    profile = tmp_path / "coverage.json"
+    write_profile(repo, base, profile)
+    (repo / "tests" / "conftest.py").write_text("VALUE = 2\n")
+    git(repo, "add", "tests/conftest.py")
+    git(repo, "commit", "-q", "-m", "change shared fixture")
+    head = git(repo, "rev-parse", "HEAD")
+    report = analyze(repo, base, head, profile, None, "conservative")
+    assert report.selection.fallback == FallbackState.FULL_SUITE
+    assert report.selection.selected_tests == sorted(report.selection.available_tests)
+    assert any("shared-fixture boundary" in warning for warning in report.warnings)
+
+
+def test_new_test_is_included_even_when_absent_from_base_profile(
+    repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
+) -> None:
+    repo = repo_factory({"pkg.py": BASE_SOURCE})
+    base = git(repo, "rev-parse", "HEAD")
+    profile = tmp_path / "coverage.json"
+    write_profile(repo, base, profile)
+    test_path = repo / "tests" / "test_new.py"
+    test_path.parent.mkdir()
+    test_path.write_text("def test_new_behavior():\n    assert True\n")
+    git(repo, "add", "tests/test_new.py")
+    git(repo, "commit", "-q", "-m", "add regression test")
+    head = git(repo, "rev-parse", "HEAD")
+    report = analyze(repo, base, head, profile, None, "conservative")
+    assert "tests/test_new.py::test_new_behavior" in report.selection.selected_tests

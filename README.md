@@ -1,0 +1,97 @@
+# BlastRadius
+
+BlastRadius is a local Python CLI that explains what a code change may affect and which tests
+exercise the affected code. It combines Git diff mapping, a conservative static call graph,
+base-revision per-test coverage, and optional representative-workload observations.
+
+This is a research prototype. Its risk score is a bounded **heuristic prioritization score**, not
+a probability of failure. Static relationships are possible relationships, workload traces are
+only observations from the named workload, and test execution does not prove assertion quality.
+
+## Install
+
+BlastRadius supports CPython 3.11 through 3.14. From a clean environment:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -c requirements-dev.lock -e '.[dev]'
+blastradius --version
+blastradius --help
+```
+
+The target repository must collect coverage in its own compatible Python environment. Installing
+BlastRadius there adds `coverage`; its test environment must also provide `pytest` and `pytest-cov`.
+
+Run the self-contained demo after installation:
+
+```bash
+python examples/run_demo.py --output demo-output
+```
+
+It creates a disposable two-commit repository, collects real base coverage, and writes an
+explainable `report.json` and `report.md` under `demo-output/`.
+
+## End-to-end workflow
+
+Collect evidence on the checked-out base revision:
+
+```bash
+blastradius coverage collect \
+  --repo /path/to/repo --rev HEAD --target src/package \
+  --profile-out /tmp/base-coverage.json -- tests
+```
+
+Optionally trace an explicit, deterministic representative workload on that revision:
+
+```bash
+blastradius trace \
+  --repo /path/to/repo --rev HEAD --workload examples/workload.py \
+  --profile-out /tmp/base-runtime.json
+```
+
+After making or checking out the head commit, analyze without rerunning the full suite:
+
+```bash
+blastradius analyze \
+  --repo /path/to/repo --base BASE_SHA --head HEAD_SHA \
+  --coverage /tmp/base-coverage.json --runtime /tmp/base-runtime.json \
+  --mode conservative --json report.json --markdown report.md
+```
+
+Omit `--runtime` when no representative workload exists. Omit `--coverage` only to obtain an
+explicit conservative full-suite fallback report; missing evidence never silently excludes code.
+
+## Implemented scope
+
+- Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.
+- Decorator-aware, nested-symbol diff mapping.
+- Direct-call static edges and reverse traversal to find dependents; cycles terminate deterministically.
+- Base-revision pytest node-ID coverage with setup/run/teardown phases and identity validation.
+- Conservative selection, changed-test inclusion, uncovered-code fallback, stable JSON, and Markdown.
+- Representative-workload call counts labelled as such; absence never removes static possibilities.
+- A transparent five-component risk model with visible inputs, weights, contributions, and warnings.
+
+## Measured limitations
+
+- Python reflection, dynamic dispatch, monkeypatching, import hooks, and many cross-module attribute calls
+  are unresolved and reported as uncertainty; this is not a sound or complete Python call graph.
+- Base coverage cannot see newly introduced control flow. Conservative mode falls back when affected
+  obligations are uncovered, but “conservative” does not mean formally safe.
+- Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and
+  counts, not arguments, and makes no low-overhead claim.
+- Replay validation, mutation experiments, persistent caching, HTML, and GitHub PR reporting are not in
+  v0.1.0. The CLI does not pretend these commands exist yet.
+- Target code is executable. A virtual environment is dependency isolation, not a security sandbox.
+
+## Development
+
+```bash
+ruff format --check .
+ruff check .
+mypy src
+pytest
+```
+
+The tests create disposable Git repositories to verify dependency direction, cycles, stale-profile
+rejection, fallback behavior, deterministic output, and the end-to-end CLI path.
