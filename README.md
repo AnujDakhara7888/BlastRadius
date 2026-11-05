@@ -139,6 +139,8 @@ security sandbox, so only trusted, side-effect-controlled code should be replaye
 - Conservative selection, changed-test inclusion, uncovered-code fallback, stable JSON, and Markdown.
 - Representative-workload call counts labelled as such; absence never removes static possibilities.
 - Bounded JSON differential replay against actual base/head snapshots with explicit outcome classes.
+- Internal deterministic, syntax-validated mutant specifications restricted to exact changed regions;
+  selected/full isolated execution is intentionally not exposed yet.
 - A transparent five-component risk model with visible inputs, weights, contributions, and warnings.
 
 ## Measured limitations
