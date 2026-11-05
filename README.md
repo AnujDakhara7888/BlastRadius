@@ -29,8 +29,8 @@ Run the self-contained demo after installation:
 python examples/run_demo.py --output demo-output
 ```
 
-It creates a disposable two-commit repository, collects real base coverage, and writes an
-explainable `report.json` and `report.md` under `demo-output/`.
+It creates a disposable two-commit repository, collects real base coverage, executes one supported
+replay case against both revisions, and writes analysis and replay artifacts under `demo-output/`.
 
 ## End-to-end workflow
 
@@ -82,6 +82,52 @@ selection-relevant analyzer settings. Reports expose base/head hit or miss state
 deleted and rebuilt; use `--no-cache` to disable persistence or `--cache-file PATH` to override the
 location. Coverage and runtime profiles retain their own stricter revision and environment identity.
 
+## Bounded differential replay
+
+Replay accepts explicit strict-JSON calls to synchronous functions defined at module scope in flat
+or conventional `src/` layouts. The cases file is tied to the exact base identity (copy the `base`
+object from an analysis report):
+
+```json
+{
+  "schema_version": "1.0",
+  "adapter_version": "json-call-v1",
+  "revision": {
+    "repository": "file:///path/to/repo",
+    "sha": "FULL_BASE_SHA",
+    "tree": "FULL_BASE_TREE_SHA"
+  },
+  "normalization": "exact",
+  "cases": [
+    {
+      "case_id": "rounding-example",
+      "function": {"path": "shop.py", "name": "checkout"},
+      "args": [1.236],
+      "kwargs": {}
+    }
+  ]
+}
+```
+
+Run the same captured inputs against actual immutable base and head snapshots:
+
+```bash
+blastradius replay \
+  --repo /path/to/repo --base BASE_SHA --head HEAD_SHA \
+  --cases replay-cases.json --timeout 5 --json replay.json
+```
+
+Each case and revision runs in a separate sanitized subprocess with a fresh extracted filesystem
+snapshot. Exact JSON return values and captured stdout/stderr are compared without stripping fields.
+Reports distinguish `identical`, `changed`, `execution_error`, `unsupported`, and `diverged`.
+A changed result may be intentional; bounded replay is evidence, not a regression verdict.
+
+The adapter rejects stale identities, nested or bound methods, async/generator functions,
+non-JSON returns, non-importable paths, oversized inputs/outputs, symlinked archive entries, and
+unsupported normalization. Timeouts and abnormal worker exits are reported as divergence. Target
+code still executes locally: process/filesystem separation and environment sanitization are not a
+security sandbox, so only trusted, side-effect-controlled code should be replayed.
+
 ## Implemented scope
 
 - Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.
@@ -92,6 +138,7 @@ location. Coverage and runtime profiles retain their own stricter revision and e
 - Base-revision pytest node-ID coverage with setup/run/teardown phases and identity validation.
 - Conservative selection, changed-test inclusion, uncovered-code fallback, stable JSON, and Markdown.
 - Representative-workload call counts labelled as such; absence never removes static possibilities.
+- Bounded JSON differential replay against actual base/head snapshots with explicit outcome classes.
 - A transparent five-component risk model with visible inputs, weights, contributions, and warnings.
 
 ## Measured limitations
@@ -103,8 +150,8 @@ location. Coverage and runtime profiles retain their own stricter revision and e
   obligations are uncovered, but “conservative” does not mean formally safe.
 - Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and
   counts, not arguments, and makes no low-overhead claim.
-- Replay validation, mutation experiments, persistent caching, HTML, and GitHub PR reporting are not in
-  v0.1.0. The CLI does not pretend these commands exist yet.
+- Replay and persistent caching were added after v0.1.0. Mutation experiments, HTML, benchmark
+  campaigns, and GitHub PR reporting are not implemented yet; the CLI does not expose them.
 - Target code is executable. A virtual environment is dependency isolation, not a security sandbox.
 
 ## Development

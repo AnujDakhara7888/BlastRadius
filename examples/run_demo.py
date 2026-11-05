@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -64,6 +65,32 @@ def main() -> None:
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", "base")
         base = git(repo, "rev-parse", "HEAD")
+        replay_cases = output / "replay-cases.json"
+        replay_cases.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "adapter_version": "json-call-v1",
+                    "revision": {
+                        "repository": repo.resolve().as_uri(),
+                        "sha": base,
+                        "tree": git(repo, "rev-parse", f"{base}^{{tree}}"),
+                    },
+                    "normalization": "exact",
+                    "cases": [
+                        {
+                            "case_id": "checkout-rounding",
+                            "function": {"path": "shop.py", "name": "checkout"},
+                            "args": [1.236],
+                            "kwargs": {},
+                        }
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
         profile = output / "base-coverage.json"
         run(
             [
@@ -90,7 +117,7 @@ def main() -> None:
         git(repo, "add", "shop.py")
         git(repo, "commit", "-q", "-m", "change rounding policy")
         head = git(repo, "rev-parse", "HEAD")
-        summary = run(
+        analysis_summary = run(
             [
                 sys.executable,
                 "-m",
@@ -113,7 +140,27 @@ def main() -> None:
             ],
             cwd=repo,
         )
-    print(summary)
+        replay_summary = run(
+            [
+                sys.executable,
+                "-m",
+                "blastradius.cli",
+                "replay",
+                "--repo",
+                str(repo),
+                "--base",
+                base,
+                "--head",
+                head,
+                "--cases",
+                str(replay_cases),
+                "--json",
+                str(output / "replay.json"),
+            ],
+            cwd=repo,
+        )
+    print(analysis_summary)
+    print(replay_summary)
     print(f"wrote demo artifacts to {output}")
 
 
