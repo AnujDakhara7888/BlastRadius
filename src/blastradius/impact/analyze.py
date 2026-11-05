@@ -56,16 +56,16 @@ def _reverse_impact(
         root_symbol = change.head or change.base
         if root_symbol is None:
             continue
+        root_identities = {
+            (symbol.id.path, symbol.id.qualified_name)
+            for symbol in (change.base, change.head)
+            if symbol is not None
+        }
         possible_roots = [
             symbol.id.key
             for index in indexes
             for symbol in index.symbols.values()
-            if symbol.id.path
-            in {
-                change.base.id.path if change.base else "",
-                change.head.id.path if change.head else "",
-            }
-            and symbol.id.qualified_name == root_symbol.id.qualified_name
+            if (symbol.id.path, symbol.id.qualified_name) in root_identities
         ]
         for graph_root in sorted(set(possible_roots)):
             queue: deque[tuple[str, tuple[str, ...], float, tuple[str, ...]]] = deque(
@@ -172,9 +172,20 @@ def _select_tests(
             )
     for change in changes:
         if change.base:
-            obligations[f"changed-region:{change.base.id.key}"] = (
+            changed_lines = set(change.base_lines)
+            structural_only = changed_lines and all(
+                line < change.base.body_start_line for line in changed_lines
+            )
+            obligation_name = (
+                f"changed-structure:{change.base.id.key}"
+                if structural_only
+                else f"changed-region:{change.base.id.key}"
+            )
+            obligations[obligation_name] = (
                 change.base.id.path,
-                set(change.base_lines),
+                set(range(change.base.start_line, change.base.end_line + 1))
+                if structural_only
+                else changed_lines,
             )
 
     reasons: dict[str, list[str]] = defaultdict(list)
@@ -359,10 +370,36 @@ def analyze(
         warnings.append(
             "Runtime evidence was valid but no observed edges mapped to static symbols."
         )
-    unresolved = len(base_index.unresolved_calls) + len(head_index.unresolved_calls)
-    if unresolved:
-        warnings.append(f"Static analysis could not resolve {unresolved} call site(s).")
-    risk = _risk(changes, impact, selection, unresolved, runtime_path is not None)
+    unresolved_sites = sorted(set(base_index.unresolved_calls) | set(head_index.unresolved_calls))
+    uncertainty_sites = sorted(
+        set(base_index.uncertainty_sites) | set(head_index.uncertainty_sites)
+    )
+    correspondence_uncertainty: list[str] = []
+    for change in changes:
+        current = change.head or change.base
+        if change.ambiguity and current:
+            correspondence_uncertainty.append(
+                f"change_correspondence:{current.id.key}:{change.ambiguity}"
+            )
+    uncertainty_sites = sorted(set(uncertainty_sites) | set(correspondence_uncertainty))
+    if unresolved_sites:
+        warnings.append(f"Static analysis could not resolve {len(unresolved_sites)} call site(s).")
+    if uncertainty_sites:
+        warnings.append(
+            f"Static analysis recorded {len(uncertainty_sites)} explicit uncertainty site(s)."
+        )
+        warnings.extend(f"Static uncertainty: {site}" for site in uncertainty_sites[:20])
+        if len(uncertainty_sites) > 20:
+            warnings.append(
+                f"Static uncertainty: {len(uncertainty_sites) - 20} additional site(s) omitted."
+            )
+    risk = _risk(
+        changes,
+        impact,
+        selection,
+        len(uncertainty_sites),
+        runtime_path is not None,
+    )
     total_ms = (time.perf_counter() - started) * 1000
     return AnalysisReport(
         SCHEMA_VERSION,

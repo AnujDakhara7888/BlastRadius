@@ -66,7 +66,9 @@ explicit conservative full-suite fallback report; missing evidence never silentl
 
 - Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.
 - Decorator-aware, nested-symbol diff mapping.
-- Direct-call static edges and reverse traversal to find dependents; cycles terminate deterministically.
+- Lexical, import-alias, module-attribute, relative-import, and `self`/`cls` call edges, plus
+  distinct module-import, decorator, and inheritance relationships.
+- Reverse traversal to find dependents; cycles terminate deterministically.
 - Base-revision pytest node-ID coverage with setup/run/teardown phases and identity validation.
 - Conservative selection, changed-test inclusion, uncovered-code fallback, stable JSON, and Markdown.
 - Representative-workload call counts labelled as such; absence never removes static possibilities.
@@ -74,8 +76,9 @@ explicit conservative full-suite fallback report; missing evidence never silentl
 
 ## Measured limitations
 
-- Python reflection, dynamic dispatch, monkeypatching, import hooks, and many cross-module attribute calls
-  are unresolved and reported as uncertainty; this is not a sound or complete Python call graph.
+- Python reflection, dynamic dispatch, monkeypatching, import hooks, wildcard imports, and unresolved
+  attribute calls are retained as location-specific uncertainty; this is not a sound or complete
+  Python call graph. Typing-only relationships are distinguished with lower confidence.
 - Base coverage cannot see newly introduced control flow. Conservative mode falls back when affected
   obligations are uncovered, but “conservative” does not mean formally safe.
 - Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and

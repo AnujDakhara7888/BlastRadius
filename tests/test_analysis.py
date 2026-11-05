@@ -9,7 +9,7 @@ from conftest import git
 
 from blastradius.errors import BlastRadiusError
 from blastradius.impact.analyze import analyze
-from blastradius.models import SCHEMA_VERSION, FallbackState
+from blastradius.models import SCHEMA_VERSION, ChangeKind, FallbackState
 from blastradius.vcs.git import resolve_revision
 
 BASE_SOURCE = """\
@@ -146,3 +146,57 @@ def test_new_test_is_included_even_when_absent_from_base_profile(
     head = git(repo, "rev-parse", "HEAD")
     report = analyze(repo, base, head, profile, None, "conservative")
     assert "tests/test_new.py::test_new_behavior" in report.selection.selected_tests
+
+
+def test_renamed_function_keeps_base_dependents_in_impact_and_selection(
+    repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
+) -> None:
+    source = (
+        "def old_price(value):\n"
+        "    return round(value, 2)\n\n"
+        "def checkout(value):\n"
+        "    return old_price(value)\n"
+    )
+    repo = repo_factory({"shop.py": source})
+    base = git(repo, "rev-parse", "HEAD")
+    profile = tmp_path / "coverage.json"
+    identity = resolve_revision(repo, base)
+    profile.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "revision": {
+                    "repository": identity.repository,
+                    "sha": identity.sha,
+                    "tree": identity.tree,
+                },
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "python": "3.12.0",
+                "coverage_version": "7.10.0",
+                "collection_fingerprint": "rename-fixture",
+                "test_lines": {
+                    "tests/test_shop.py::test_checkout": {"shop.py": [2, 5]},
+                    "tests/test_shop.py::test_other": {"shop.py": []},
+                },
+                "phases": {
+                    "tests/test_shop.py::test_checkout": ["run"],
+                    "tests/test_shop.py::test_other": ["run"],
+                },
+                "unmapped_contexts": [],
+            }
+        )
+    )
+    (repo / "shop.py").write_text(source.replace("old_price", "new_price"))
+    git(repo, "add", "shop.py")
+    git(repo, "commit", "-q", "-m", "rename price helper")
+    head = git(repo, "rev-parse", "HEAD")
+    report = analyze(repo, base, head, profile, None, "conservative")
+    renamed = next(
+        change for change in report.changed_symbols if change.change == ChangeKind.RENAMED
+    )
+    assert renamed.base is not None and renamed.base.id.qualified_name == "old_price"
+    assert renamed.head is not None and renamed.head.id.qualified_name == "new_price"
+    assert any(
+        finding.affected_symbol == "shop.py:checkout:function:0" for finding in report.impact
+    )
+    assert report.selection.selected_tests == ["tests/test_shop.py::test_checkout"]
