@@ -200,3 +200,51 @@ def test_renamed_function_keeps_base_dependents_in_impact_and_selection(
         finding.affected_symbol == "shop.py:checkout:function:0" for finding in report.impact
     )
     assert report.selection.selected_tests == ["tests/test_shop.py::test_checkout"]
+
+
+def test_pure_file_move_uses_symbol_coverage_without_empty_region_fallback(
+    repo_factory: Callable[[dict[str, str]], Path], tmp_path: Path
+) -> None:
+    repo = repo_factory({"old.py": "def helper():\n    return 1\n"})
+    base = git(repo, "rev-parse", "HEAD")
+    identity = resolve_revision(repo, base)
+    profile = tmp_path / "move-coverage.json"
+    profile.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "revision": {
+                    "repository": identity.repository,
+                    "sha": identity.sha,
+                    "tree": identity.tree,
+                },
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "python": "3.12.0",
+                "coverage_version": "7.10.0",
+                "collection_fingerprint": "move-fixture",
+                "test_lines": {
+                    "tests/test_old.py::test_helper": {"old.py": [2]},
+                    "tests/test_old.py::test_other": {"old.py": []},
+                },
+                "phases": {
+                    "tests/test_old.py::test_helper": ["run"],
+                    "tests/test_old.py::test_other": ["run"],
+                },
+                "unmapped_contexts": [],
+            }
+        )
+    )
+    (repo / "old.py").rename(repo / "new.py")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "move helper module")
+    report = analyze(repo, base, "HEAD", profile, None, "conservative")
+    helper_move = next(
+        change
+        for change in report.changed_symbols
+        if change.head and change.head.id.qualified_name == "helper"
+    )
+    assert helper_move.change == ChangeKind.RENAMED
+    assert helper_move.base is not None and helper_move.base.id.path == "old.py"
+    assert helper_move.head is not None and helper_move.head.id.path == "new.py"
+    assert report.selection.fallback == FallbackState.NONE
+    assert report.selection.selected_tests == ["tests/test_old.py::test_helper"]
