@@ -31,6 +31,14 @@ class FallbackState(StrEnum):
     FULL_SUITE = "full_suite"
 
 
+class ReplayOutcome(StrEnum):
+    IDENTICAL = "identical"
+    CHANGED = "changed"
+    EXECUTION_ERROR = "execution_error"
+    UNSUPPORTED = "unsupported"
+    DIVERGED = "diverged"
+
+
 @dataclass(frozen=True, slots=True)
 class RevisionIdentity:
     repository: str
@@ -156,6 +164,46 @@ class AnalysisReport:
     warnings: list[str]
     timings_ms: dict[str, float]
     cache_state: str = "disabled"
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayCase:
+    case_id: str
+    path: str
+    function: str
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+
+    @property
+    def function_id(self) -> str:
+        return f"{self.path}:{self.function}"
+
+
+@dataclass(slots=True)
+class ReplayResult:
+    case_id: str
+    function_id: str
+    outcome: ReplayOutcome
+    base_observation: dict[str, Any] | None
+    head_observation: dict[str, Any] | None
+    divergence: dict[str, Any] | None
+    unsupported_reason: str | None
+    durations_ms: dict[str, float]
+
+
+@dataclass(slots=True)
+class ReplayReport:
+    schema_version: str
+    adapter_version: str
+    base: RevisionIdentity
+    head: RevisionIdentity
+    capture_revision: RevisionIdentity
+    input_schema: str
+    normalization: str
+    environment: dict[str, str]
+    limits: dict[str, int]
+    results: list[ReplayResult]
+    warnings: list[str]
 
 
 def to_primitive(value: Any) -> Any:

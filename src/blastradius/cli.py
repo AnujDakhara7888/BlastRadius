@@ -12,6 +12,7 @@ from blastradius.errors import BlastRadiusError
 from blastradius.impact.analyze import analyze
 from blastradius.report.render import write_json, write_markdown
 from blastradius.runtime.profile import collect_runtime_profile
+from blastradius.validate.replay import DEFAULT_TIMEOUT_SECONDS, replay, write_replay_report
 
 
 def _path(value: str) -> Path:
@@ -60,6 +61,18 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument("--rev", required=True)
     trace.add_argument("--workload", type=Path, required=True)
     trace.add_argument("--profile-out", type=_path, required=True)
+
+    replay_parser = commands.add_parser(
+        "replay", help="compare supported JSON calls across base and head revisions"
+    )
+    replay_parser.add_argument("--repo", type=_path, required=True)
+    replay_parser.add_argument("--base", required=True)
+    replay_parser.add_argument("--head", required=True)
+    replay_parser.add_argument("--cases", type=_path, required=True)
+    replay_parser.add_argument(
+        "--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS, help="seconds per call"
+    )
+    replay_parser.add_argument("--json", type=_path, required=True)
     return parser
 
 
@@ -75,8 +88,29 @@ def run(args: argparse.Namespace) -> int:
         collect_runtime_profile(args.repo, args.rev, args.workload, args.profile_out)
         print(f"wrote representative-workload profile: {args.profile_out}")
         return 0
+    if args.command == "replay":
+        replay_report = replay(
+            args.repo,
+            args.base,
+            args.head,
+            args.cases,
+            timeout_seconds=args.timeout,
+        )
+        write_replay_report(replay_report, args.json)
+        counts = {
+            outcome: sum(result.outcome.value == outcome for result in replay_report.results)
+            for outcome in (
+                "identical",
+                "changed",
+                "execution_error",
+                "unsupported",
+                "diverged",
+            )
+        }
+        print("; ".join(f"{name}={count}" for name, count in counts.items()))
+        return 0
     if args.command == "analyze":
-        report = analyze(
+        analysis_report = analyze(
             args.repo,
             args.base,
             args.head,
@@ -86,13 +120,13 @@ def run(args: argparse.Namespace) -> int:
             use_cache=not args.no_cache,
             cache_file=args.cache_file,
         )
-        write_json(report, args.json)
-        write_markdown(report, args.markdown)
+        write_json(analysis_report, args.json)
+        write_markdown(analysis_report, args.markdown)
         print(
-            f"selected {len(report.selection.selected_tests)}/"
-            f"{len(report.selection.available_tests)} known tests; "
-            f"risk={report.risk.score:.2f}/100; "
-            f"fallback={report.selection.fallback.value}"
+            f"selected {len(analysis_report.selection.selected_tests)}/"
+            f"{len(analysis_report.selection.available_tests)} known tests; "
+            f"risk={analysis_report.risk.score:.2f}/100; "
+            f"fallback={analysis_report.selection.fallback.value}"
         )
         return 0
     raise BlastRadiusError("no command selected")
