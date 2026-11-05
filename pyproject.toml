@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "blastradius"
+version = "0.1.0"
+description = "Explainable, production-aware test selection for Python changes"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+authors = [{name = "Anuj Dakhara"}]
+dependencies = ["coverage>=7.10,<8"]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.18,<2",
+  "pytest>=8.4,<10",
+  "pytest-cov>=7,<8",
+  "ruff>=0.14,<0.16",
+]
+
+[project.scripts]
+blastradius = "blastradius.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/blastradius"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["blastradius"]
