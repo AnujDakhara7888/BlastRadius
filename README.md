@@ -62,6 +62,19 @@ blastradius analyze \
 Omit `--runtime` when no representative workload exists. Omit `--coverage` only to obtain an
 explicit conservative full-suite fallback report; missing evidence never silently excludes code.
 
+Selection modes are intentionally different:
+
+- `conservative` takes the union of tests covering every mapped impact obligation and falls back
+  to the full suite when affected obligations lack evidence.
+- `balanced` takes that union through two incoming dependency edges, always retains direct and
+  changed-test obligations, and reports every deeper obligation it truncated.
+- `aggressive` applies deterministic greedy set cover to all explicit obligations. It reports
+  uncovered obligations and is not claimed to be mathematically minimal. Coverage-equivalent tests
+  can still contain different assertions.
+
+Dependency, pytest configuration, and shared-fixture changes require a full-suite fallback in all
+three modes.
+
 ## Implemented scope
 
 - Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.

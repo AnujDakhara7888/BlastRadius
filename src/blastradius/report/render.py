@@ -28,6 +28,8 @@ def write_markdown(report: AnalysisReport, output: Path) -> None:
         f"- Selected tests: **{len(report.selection.selected_tests)} / "
         f"{len(report.selection.available_tests)}**",
         f"- Fallback: `{report.selection.fallback.value}`",
+        f"- Uncovered obligations: **{len(report.selection.uncovered_obligations)}**",
+        f"- Truncated obligations: **{len(report.selection.truncated_obligations)}**",
         "",
         "## Changed symbols",
         "",

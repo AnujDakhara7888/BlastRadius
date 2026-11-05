@@ -147,20 +147,37 @@ def _select_tests(
     warnings: list[str] = []
     if coverage_path is None:
         warnings.append(
-            "Coverage evidence is missing; conservative policy requires a full-suite fallback."
+            "Coverage evidence is missing; analysis requires an explicit full-suite fallback."
         )
         return (
             TestSelection(
-                mode, [], [], {}, FallbackState.FULL_SUITE, ["all_impact_obligations"], []
+                mode,
+                [],
+                sorted(changed_test_ids),
+                {
+                    test_id: ["new or changed test discovered at the head revision"]
+                    for test_id in sorted(changed_test_ids)
+                },
+                FallbackState.FULL_SUITE,
+                ["all_impact_obligations"],
+                [],
+                [],
             ),
             warnings,
         )
+
     profile = load_profile(coverage_path)
     validate_profile(profile, base_identity)
     available = sorted(profile.test_lines)
-    affected_keys = {item.affected_symbol for item in impact}
-    obligations: dict[str, tuple[str, set[int]]] = {}
-    for key in affected_keys:
+    impact_depth: dict[str, int] = {}
+    for item in impact:
+        depth = max(len(item.dependency_path) - 1, 0)
+        impact_depth[item.affected_symbol] = min(
+            depth, impact_depth.get(item.affected_symbol, depth)
+        )
+
+    obligations: dict[str, tuple[str, set[int], int, bool]] = {}
+    for key, depth in sorted(impact_depth.items()):
         symbol = base_index.symbols.get(key)
         is_test_source = symbol and (
             symbol.id.path.startswith("tests/") or Path(symbol.id.path).name.startswith("test_")
@@ -169,9 +186,11 @@ def _select_tests(
             obligations[f"symbol:{symbol.id.key}"] = (
                 symbol.id.path,
                 set(range(symbol.start_line, symbol.end_line + 1)),
+                depth,
+                depth == 0,
             )
     for change in changes:
-        if change.base:
+        if change.base and change.base_lines:
             changed_lines = set(change.base_lines)
             structural_only = changed_lines and all(
                 line < change.base.body_start_line for line in changed_lines
@@ -186,40 +205,91 @@ def _select_tests(
                 set(range(change.base.start_line, change.base.end_line + 1))
                 if structural_only
                 else changed_lines,
+                0,
+                True,
+            )
+
+    active_obligations = dict(obligations)
+    truncated: list[str] = []
+    if mode == "balanced":
+        active_obligations = {
+            name: details for name, details in obligations.items() if details[3] or details[2] <= 2
+        }
+        truncated = sorted(set(obligations) - set(active_obligations))
+        if truncated:
+            warnings.append(
+                "Balanced policy truncated transitive obligations beyond dependency depth 2: "
+                + ", ".join(truncated)
             )
 
     reasons: dict[str, list[str]] = defaultdict(list)
-    selected: set[str] = set()
-    covered_obligations: set[str] = set()
+    coverage_by_test: dict[str, set[str]] = defaultdict(set)
+    overlap_by_test: dict[str, dict[str, list[int]]] = defaultdict(dict)
     for test_id, files in sorted(profile.test_lines.items()):
         for path, lines in sorted(files.items()):
-            for obligation, (obligation_path, obligation_lines) in obligations.items():
+            for obligation, details in active_obligations.items():
+                obligation_path, obligation_lines, _depth, _direct = details
                 if path != obligation_path:
                     continue
                 overlap = obligation_lines.intersection(lines)
                 if overlap:
-                    selected.add(test_id)
+                    coverage_by_test[test_id].add(obligation)
+                    overlap_by_test[test_id][obligation] = sorted(overlap)
+
+    selected: set[str] = set()
+    if mode in {"conservative", "balanced"}:
+        for test_id, covered in sorted(coverage_by_test.items()):
+            if covered:
+                selected.add(test_id)
+                for obligation in sorted(covered):
+                    lines = overlap_by_test[test_id][obligation]
                     reasons[test_id].append(
-                        f"covers {obligation} lines {','.join(map(str, sorted(overlap)[:8]))}"
+                        f"covers {obligation} lines {','.join(map(str, lines[:8]))}"
                     )
-                    covered_obligations.add(obligation)
+    else:
+        remaining = set(active_obligations)
+        while remaining:
+            ranked = sorted(
+                (
+                    (-len(covered & remaining), test_id, covered & remaining)
+                    for test_id, covered in coverage_by_test.items()
+                    if covered & remaining
+                ),
+                key=lambda item: (item[0], item[1]),
+            )
+            if not ranked:
+                break
+            _negative_gain, test_id, newly_covered = ranked[0]
+            selected.add(test_id)
+            for obligation in sorted(newly_covered):
+                lines = overlap_by_test[test_id][obligation]
+                reasons[test_id].append(
+                    f"greedy set cover adds {obligation} lines {','.join(map(str, lines[:8]))}"
+                )
+            remaining.difference_update(newly_covered)
+        warnings.append(
+            "Aggressive policy uses deterministic greedy set cover; the result is not "
+            "mathematically minimal and coverage does not imply equivalent assertions."
+        )
+
+    for test_id in available:
         test_path = test_id.split("::", 1)[0]
         if test_path in modified_paths:
             selected.add(test_id)
             reasons[test_id].append("test file changed in this revision range")
-
     for test_id in sorted(changed_test_ids):
         selected.add(test_id)
         reasons[test_id].append("new or changed test discovered at the head revision")
 
-    uncovered = sorted(set(obligations) - covered_obligations)
+    coverable = set().union(*coverage_by_test.values()) if coverage_by_test else set()
+    uncovered = sorted(set(active_obligations) - coverable)
     fallback = FallbackState.NONE
-    if unsupported_boundary and mode == "conservative":
+    if unsupported_boundary:
         fallback = FallbackState.FULL_SUITE
         selected.update(available)
         warnings.append(
             "A dependency, pytest configuration, or shared-fixture boundary changed; "
-            "conservative full-suite fallback applied."
+            "required full-suite fallback applied."
         )
         for test_id in available:
             reasons[test_id].append("full-suite fallback for unsupported boundary change")
@@ -230,15 +300,21 @@ def _select_tests(
         )
         if mode == "conservative":
             fallback = FallbackState.FULL_SUITE
-            selected = set(available)
+            selected.update(available)
             for test_id in available:
                 reasons[test_id].append("full-suite fallback for uncovered affected code")
     if mode == "conservative" and not selected and changes:
         fallback = FallbackState.FULL_SUITE
-        selected = set(available)
+        selected.update(available)
         warnings.append(
             "No tests mapped to semantic changes; conservative full-suite fallback applied."
         )
+
+    policy_provenance = {
+        "conservative": "conservative:union",
+        "balanced": "balanced:max_dependency_depth=2",
+        "aggressive": "aggressive:deterministic_greedy_set_cover",
+    }[mode]
     return (
         TestSelection(
             mode,
@@ -251,7 +327,8 @@ def _select_tests(
             },
             fallback,
             uncovered,
-            [str(coverage_path)],
+            truncated,
+            [str(coverage_path), policy_provenance],
         ),
         warnings,
     )
@@ -269,7 +346,11 @@ def _risk(
     coverage_gap = (
         1.0
         if selection.fallback == FallbackState.FULL_SUITE
-        else min(len(selection.uncovered_obligations) / max(len(impact), 1), 1.0)
+        else min(
+            (len(selection.uncovered_obligations) + len(selection.truncated_obligations))
+            / max(len(impact), 1),
+            1.0,
+        )
     )
     exposure = 0.5 if not runtime_supplied else 0.75
     uncertainty = min(

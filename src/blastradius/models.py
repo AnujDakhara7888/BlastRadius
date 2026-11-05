@@ -128,6 +128,7 @@ class TestSelection:
     reasons: dict[str, list[str]]
     fallback: FallbackState
     uncovered_obligations: list[str]
+    truncated_obligations: list[str]
     provenance: list[str]
 
 
