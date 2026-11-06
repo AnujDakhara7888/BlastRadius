@@ -241,6 +241,67 @@ class MutantGenerationReport:
     warnings: list[str]
 
 
+class SuiteStatus(StrEnum):
+    PASSED = "passed"
+    TEST_FAILURE = "test_failure"
+    TIMEOUT = "timeout"
+    NO_TESTS = "no_tests"
+    INFRASTRUCTURE_ERROR = "infrastructure_error"
+    OUTPUT_LIMIT = "output_limit"
+
+
+class MutationOutcome(StrEnum):
+    KILLED = "killed"
+    SURVIVED = "survived"
+    BASELINE_FAILED = "baseline_failed"
+    INFRASTRUCTURE_ERROR = "infrastructure_error"
+    INCONCLUSIVE = "inconclusive"
+
+
+@dataclass(slots=True)
+class SuiteExecution:
+    status: SuiteStatus
+    exit_code: int | None
+    collected: int
+    passed: int
+    failed: int
+    skipped: int
+    duration_ms: float
+    reason: str
+    stdout: str = ""
+    stderr: str = ""
+    collected_tests: list[str] = field(default_factory=list)
+    passed_tests: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class MutationSuiteResult:
+    outcome: MutationOutcome
+    reason: str
+    execution: SuiteExecution | None
+
+
+@dataclass(slots=True)
+class MutantExecutionResult:
+    mutant: MutantSpec
+    selected: MutationSuiteResult
+    full: MutationSuiteResult
+
+
+@dataclass(slots=True)
+class MutationExecutionReport:
+    schema_version: str
+    runner_version: str
+    generation: MutantGenerationReport
+    selected_tests: list[str]
+    full_suite: list[str]
+    baselines: dict[str, SuiteExecution]
+    results: list[MutantExecutionResult]
+    environment: dict[str, str]
+    limits: dict[str, int]
+    warnings: list[str]
+
+
 def to_primitive(value: Any) -> Any:
     """Convert nested contracts into stable JSON-compatible primitives."""
     if hasattr(value, "__dataclass_fields__"):
