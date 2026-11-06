@@ -140,7 +140,8 @@ security sandbox, so only trusted, side-effect-controlled code should be replaye
 - Representative-workload call counts labelled as such; absence never removes static possibilities.
 - Bounded JSON differential replay against actual base/head snapshots with explicit outcome classes.
 - Internal deterministic, syntax-validated mutant specifications restricted to exact changed regions;
-  selected/full isolated execution is intentionally not exposed yet.
+  internal matched selected/full pytest runners with clean-head baselines and explicit failure,
+  infrastructure, timeout, and inconclusive outcomes. The mutation CLI is not exposed yet.
 - A transparent five-component risk model with visible inputs, weights, contributions, and warnings.
 
 ## Measured limitations
@@ -152,8 +153,16 @@ security sandbox, so only trusted, side-effect-controlled code should be replaye
   obligations are uncovered, but “conservative” does not mean formally safe.
 - Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and
   counts, not arguments, and makes no low-overhead claim.
-- Replay and persistent caching were added after v0.1.0. Mutation experiments, HTML, benchmark
-  campaigns, and GitHub PR reporting are not implemented yet; the CLI does not expose them.
+- Replay and persistent caching were added after v0.1.0. Mutation generation and isolated execution
+  are internal APIs; mutation-score denominators, a public mutation CLI, HTML, benchmark campaigns,
+  and GitHub PR reporting are not implemented yet.
+- Internal mutation runs use the current interpreter's dependencies with pytest plugin autoload
+  disabled. Each suite must pass on the immutable clean head before its mutants execute, with the
+  same timeout and environment policy. A kill requires pytest test-phase failure; collection errors
+  are infrastructure failures, and timeouts, empty/skipped-only suites, or changed passing test sets
+  are inconclusive. Fresh snapshots and sanitized processes are not a security sandbox. POSIX runs
+  clean up worker process groups; other platforms terminate only the direct worker. Output is polled
+  against a limit and retained logs are truncated; this is not a hard disk-resource quota.
 - Target code is executable. A virtual environment is dependency isolation, not a security sandbox.
 
 ## Development
