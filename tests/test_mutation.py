@@ -43,6 +43,8 @@ def test_mutants_are_deterministic_valid_and_restricted_to_changed_lines(
 
     assert first == second
     assert first.mutants
+    assert first.total_generated_candidates == first.total_valid_candidates
+    assert first.syntax_rejected_candidates == 0
     assert first.total_valid_candidates == len(first.mutants)
     changed_lines = set(first.changed_regions["logic.py"])
     operators = {mutant.operator.split(":", 1)[0] for mutant in first.mutants}
@@ -71,6 +73,7 @@ def test_seed_only_changes_stable_sampling_order_and_cap(
 
     assert len(capped.mutants) == 2
     assert capped.total_valid_candidates == all_mutants.total_valid_candidates
+    assert capped.total_generated_candidates == all_mutants.total_generated_candidates
     assert capped.truncated_candidates == capped.total_valid_candidates - 2
     assert all(mutant.seed == 99 for mutant in capped.mutants)
     assert {mutant.mutant_id for mutant in capped.mutants} <= {
@@ -132,3 +135,28 @@ def test_multi_token_comparison_preserves_validity_with_noncanonical_spacing(
 
     assert "value is None" in mutated
     compile(mutated, "logic.py", "exec")
+
+
+def test_syntax_rejections_are_counted_before_sampling(
+    repo_factory: Callable[[dict[str, str]], Path],
+) -> None:
+    source = (
+        "def keys(value):\n"
+        "    match value:\n"
+        "        case {0: left, 2: right}:\n"
+        "            return left\n"
+    )
+    repo = repo_factory({"logic.py": source})
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "logic.py").write_text(source.replace("2: right", "1: right"))
+    git(repo, "add", "logic.py")
+    git(repo, "commit", "-q", "-m", "change mapping key")
+
+    report = generate_mutants(repo, base, "HEAD", max_mutants=1)
+
+    # Both 0->1 and 1->0 introduce duplicate mapping-pattern keys: compile rejects them.
+    assert report.total_generated_candidates == 2
+    assert report.syntax_rejected_candidates == 2
+    assert report.total_valid_candidates == 0
+    assert report.truncated_candidates == 0
+    assert report.mutants == []

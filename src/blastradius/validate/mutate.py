@@ -18,7 +18,7 @@ from blastradius.models import (
 )
 from blastradius.vcs.git import diff_files, read_file, resolve_revision
 
-GENERATOR_VERSION = "ast-changed-regions-v1"
+GENERATOR_VERSION = "ast-changed-regions-v2"
 DEFAULT_MAX_MUTANTS = 100
 
 _BINARY_OPERATORS: dict[type[ast.operator], tuple[str, str]] = {
@@ -297,6 +297,8 @@ def generate_mutants(
     head_identity = resolve_revision(repo, head)
     changed_regions: dict[str, list[int]] = {}
     candidates: list[MutantSpec] = []
+    generated = 0
+    syntax_rejected = 0
     for file_diff in diff_files(repo, base_identity.sha, head_identity.sha):
         if file_diff.new_path is None or not file_diff.new_lines:
             continue
@@ -313,11 +315,17 @@ def generate_mutants(
         changed_regions[file_diff.new_path] = sorted(changed_lines)
         collector = _Collector(_Offsets(source), changed_lines)
         collector.visit(tree)
-        for candidate in collector.candidates:
+        # Count unique transformations before compilation and before seeded sampling.
+        for candidate in dict.fromkeys(collector.candidates):
+            generated += 1
             spec = _spec(head_identity.sha, file_diff.new_path, source, candidate, seed)
             if spec is not None:
                 candidates.append(spec)
+            else:
+                syntax_rejected += 1
     unique = {item.mutant_id: item for item in candidates}
+    if len(unique) != len(candidates):
+        raise BlastRadiusError("duplicate generated mutant identity; cannot report truthful counts")
     ordered = sorted(
         unique.values(),
         key=lambda item: (
@@ -334,6 +342,8 @@ def generate_mutants(
         seed,
         max_mutants,
         dict(sorted(changed_regions.items())),
+        generated,
+        syntax_rejected,
         len(ordered),
         max(len(ordered) - len(selected), 0),
         selected,

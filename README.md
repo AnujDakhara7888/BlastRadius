@@ -128,6 +128,35 @@ unsupported normalization. Timeouts and abnormal worker exits are reported as di
 code still executes locally: process/filesystem separation and environment sanitization are not a
 security sandbox, so only trusted, side-effect-controlled code should be replayed.
 
+## Internal mutation experiment reports
+
+Mutation generation and execution remain internal Python APIs. The execution report includes an
+explicit `summary` for bounded changed-region experiments:
+
+- `generation.generated` counts unique candidate transformations before compilation;
+  `syntax_rejected` counts compile failures, and `valid` counts syntax-valid candidates.
+  Thus `generated = syntax_rejected + valid`. Syntax validity does not establish semantic validity.
+- `sampled` counts the deterministically seeded, capped mutant list; `truncated` counts valid
+  candidates omitted by the cap. Thus `valid = sampled + truncated`. Rejected and truncated
+  candidates never enter an execution denominator.
+- Each suite reports its own clean-head baseline status, eligibility, eligible and executed mutant
+  counts, kills, survivals, and exclusions by `baseline_failed`, `infrastructure_error`, or
+  `inconclusive`. Only a passing baseline permits execution. `score_denominator = killed + survived`;
+  `kill_ratio = killed / score_denominator`. `executed` counts recorded mutant execution attempts,
+  including infrastructure failures after a passing baseline; it excludes baseline executions.
+- The selected/full comparison uses only mutants with conclusive outcomes in **both** suites.
+  It reports both killed, selected-only killed, full-only killed, both survived, and excluded counts.
+  `full_kill_denominator = both_killed + full_only_killed` on that shared cohort, and
+  `kill_retention_ratio = both_killed / full_kill_denominator`. Excluded full-suite kills remain
+  visible in individual results and the full-suite summary; they are not silently treated as
+  selected-suite survivals. No subset relationship between suite selectors is assumed.
+
+Ratios are fractions from 0 to 1; a zero denominator produces JSON `null`, including a comparison
+with no full-suite kills. Every sampled mutant retains both outcomes and exclusion reasons in
+`results`. These are observations about the sampled changed-region mutants, not estimates of a
+whole-project mutation score or evidence that survivors are equivalent. Old internal generation
+reports without the count ledger must be regenerated; generator and runner versions are now `v2`.
+
 ## Implemented scope
 
 - Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.
@@ -141,7 +170,8 @@ security sandbox, so only trusted, side-effect-controlled code should be replaye
 - Bounded JSON differential replay against actual base/head snapshots with explicit outcome classes.
 - Internal deterministic, syntax-validated mutant specifications restricted to exact changed regions;
   internal matched selected/full pytest runners with clean-head baselines and explicit failure,
-  infrastructure, timeout, and inconclusive outcomes. The mutation CLI is not exposed yet.
+  infrastructure, timeout, and inconclusive outcomes; explicit generation and score denominators
+  with paired outcome comparisons. The mutation CLI is not exposed yet.
 - A transparent five-component risk model with visible inputs, weights, contributions, and warnings.
 
 ## Measured limitations
@@ -153,8 +183,8 @@ security sandbox, so only trusted, side-effect-controlled code should be replaye
   obligations are uncovered, but “conservative” does not mean formally safe.
 - Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and
   counts, not arguments, and makes no low-overhead claim.
-- Replay and persistent caching were added after v0.1.0. Mutation generation and isolated execution
-  are internal APIs; mutation-score denominators, a public mutation CLI, HTML, benchmark campaigns,
+- Replay and persistent caching were added after v0.1.0. Mutation generation, isolated execution,
+  and denominator reporting are internal APIs; a public mutation CLI, HTML, benchmark campaigns,
   and GitHub PR reporting are not implemented yet.
 - Internal mutation runs use the current interpreter's dependencies with pytest plugin autoload
   disabled. Each suite must pass on the immutable clean head before its mutants execute, with the

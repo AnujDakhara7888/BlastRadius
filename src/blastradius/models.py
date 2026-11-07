@@ -235,6 +235,8 @@ class MutantGenerationReport:
     seed: int
     max_mutants: int
     changed_regions: dict[str, list[int]]
+    total_generated_candidates: int
+    syntax_rejected_candidates: int
     total_valid_candidates: int
     truncated_candidates: int
     mutants: list[MutantSpec]
@@ -289,6 +291,48 @@ class MutantExecutionResult:
 
 
 @dataclass(slots=True)
+class MutationGenerationCounts:
+    generated: int
+    syntax_rejected: int
+    valid: int
+    sampled: int
+    truncated: int
+
+
+@dataclass(slots=True)
+class MutationSuiteSummary:
+    baseline_status: SuiteStatus
+    baseline_eligible: bool
+    eligible: int
+    executed: int
+    killed: int
+    survived: int
+    exclusions: dict[str, int]
+    score_denominator: int
+    kill_ratio: float | None
+
+
+@dataclass(slots=True)
+class MutationComparison:
+    baseline_eligible: bool
+    comparable: int
+    excluded: int
+    both_killed: int
+    selected_only_killed: int
+    full_only_killed: int
+    both_survived: int
+    full_kill_denominator: int
+    kill_retention_ratio: float | None
+
+
+@dataclass(slots=True)
+class MutationSummary:
+    generation: MutationGenerationCounts
+    suites: dict[str, MutationSuiteSummary]
+    comparison: MutationComparison
+
+
+@dataclass(slots=True)
 class MutationExecutionReport:
     schema_version: str
     runner_version: str
@@ -297,6 +341,7 @@ class MutationExecutionReport:
     full_suite: list[str]
     baselines: dict[str, SuiteExecution]
     results: list[MutantExecutionResult]
+    summary: MutationSummary
     environment: dict[str, str]
     limits: dict[str, int]
     warnings: list[str]
