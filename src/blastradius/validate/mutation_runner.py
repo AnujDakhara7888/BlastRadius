@@ -1,4 +1,4 @@
-"""Internal matched selected/full pytest experiments; no mutation-score claims."""
+"""Internal matched selected/full pytest experiments with explicit score denominators."""
 
 from __future__ import annotations
 
@@ -28,10 +28,11 @@ from blastradius.models import (
     to_primitive,
 )
 from blastradius.validate.mutate import GENERATOR_VERSION, apply_mutant
+from blastradius.validate.mutation_summary import generation_counts, summarize_mutations
 from blastradius.validate.replay import _archive, _extract_archive
 from blastradius.vcs.git import resolve_revision
 
-RUNNER_VERSION = "isolated-pytest-v1"
+RUNNER_VERSION = "isolated-pytest-v2"
 MAX_OUTPUT_BYTES = 1_048_576
 
 
@@ -249,6 +250,7 @@ def run_mutants(
         or generation.generator_version != GENERATOR_VERSION
     ):
         raise BlastRadiusError("unsupported mutation generation schema or version")
+    generation_counts(generation)
     if (
         resolve_revision(repo, generation.head.sha) != generation.head
         or resolve_revision(repo, generation.base.sha) != generation.base
@@ -330,6 +332,7 @@ def run_mutants(
         full,
         baselines,
         results,
+        summarize_mutations(generation, baselines, results),
         {
             "python": platform.python_version(),
             "implementation": platform.python_implementation(),
@@ -346,7 +349,9 @@ def run_mutants(
             "Timeouts, skipped-only suites and infrastructure errors are not kills or survivals.",
             "A surviving mutant is not evidence of semantic equivalence.",
             "Target code executes locally; only trusted, side-effect-controlled code is supported.",
-            "These internal execution observations do not yet define mutation-score denominators.",
+            "Kill ratios use only killed + survived outcomes after a passing suite baseline.",
+            "Paired comparison excludes any mutant without conclusive outcomes in both suites.",
+            "Sampled changed-region mutants do not estimate a whole-project mutation score.",
         ],
     )
 

@@ -33,6 +33,7 @@ def _experiment(
     generation = generate_mutants(repo, base, "HEAD")
     return repo, replace(
         generation,
+        truncated_candidates=generation.total_valid_candidates - 1,
         mutants=[next(mutant for mutant in generation.mutants if mutant.operator == operator)],
     )
 
@@ -87,6 +88,17 @@ def test_exact():
     assert raw["limits"]["timeout_seconds"] == 5
     assert raw["results"][0]["full"]["outcome"] == "killed"
     assert raw["baselines"]["selected"]["passed_tests"] == ["tests/test_logic.py::test_smoke"]
+    assert raw["summary"]["generation"] == {
+        "generated": 3,
+        "syntax_rejected": 0,
+        "valid": 3,
+        "sampled": 1,
+        "truncated": 2,
+    }
+    assert raw["summary"]["suites"]["selected"]["kill_ratio"] == 0.0
+    assert raw["summary"]["suites"]["full"]["kill_ratio"] == 1.0
+    assert raw["summary"]["comparison"]["full_only_killed"] == 1
+    assert raw["summary"]["comparison"]["kill_retention_ratio"] == 0.0
 
 
 def test_failing_clean_head_is_not_a_mutant_kill(
@@ -103,6 +115,12 @@ def test_failing_clean_head_is_not_a_mutant_kill(
         assert suite.outcome == MutationOutcome.BASELINE_FAILED
         assert suite.execution is None
         assert "clean-head baseline" in suite.reason
+    for summary in report.summary.suites.values():
+        assert not summary.baseline_eligible
+        assert summary.eligible == summary.executed == summary.score_denominator == 0
+        assert summary.exclusions["baseline_failed"] == 1
+        assert summary.kill_ratio is None
+    assert report.summary.comparison.excluded == 1
 
 
 def test_empty_selection_does_not_accidentally_run_full_suite(
@@ -120,6 +138,11 @@ def test_empty_selection_does_not_accidentally_run_full_suite(
     assert report.results[0].selected.outcome == MutationOutcome.INCONCLUSIVE
     assert report.results[0].selected.execution is None
     assert report.results[0].full.outcome == MutationOutcome.KILLED
+    assert report.summary.suites["selected"].exclusions["inconclusive"] == 1
+    assert report.summary.suites["selected"].kill_ratio is None
+    assert report.summary.suites["full"].score_denominator == 1
+    assert report.summary.comparison.comparable == 0
+    assert report.summary.comparison.kill_retention_ratio is None
 
 
 @pytest.mark.parametrize(
@@ -188,6 +211,11 @@ def test_mutant_timeouts_are_not_counted_as_kills(
         assert suite.outcome == MutationOutcome.INCONCLUSIVE
         assert suite.execution is not None
         assert suite.execution.status == SuiteStatus.TIMEOUT
+    for summary in report.summary.suites.values():
+        assert summary.eligible == summary.executed == 1
+        assert summary.exclusions["inconclusive"] == 1
+        assert summary.score_denominator == 0
+        assert summary.kill_ratio is None
 
 
 def test_mutant_collection_errors_are_not_test_kills(
@@ -265,6 +293,8 @@ def test_rejects_stale_specs_and_unsafe_inputs_before_execution(
         run_mutants(repo, generation, ["--pyargs"])
     with pytest.raises(BlastRadiusError, match="timeout"):
         run_mutants(repo, generation, [], timeout_seconds=0)
+    with pytest.raises(BlastRadiusError, match="generation counts"):
+        run_mutants(repo, replace(generation, truncated_candidates=0), [])
     with pytest.raises(BlastRadiusError, match="identity"):
         run_mutants(repo, replace(generation, head=replace(generation.head, tree="0" * 40)), [])
     stale = replace(generation.mutants[0], source_hash="0" * 64)
