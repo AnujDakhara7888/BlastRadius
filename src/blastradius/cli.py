@@ -12,6 +12,8 @@ from blastradius.errors import BlastRadiusError
 from blastradius.impact.analyze import analyze
 from blastradius.report.render import write_json, write_markdown
 from blastradius.runtime.profile import collect_runtime_profile
+from blastradius.validate.mutate import DEFAULT_MAX_MUTANTS
+from blastradius.validate.mutation import mutate, write_mutation_report
 from blastradius.validate.replay import DEFAULT_TIMEOUT_SECONDS, replay, write_replay_report
 
 
@@ -73,10 +75,54 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS, help="seconds per call"
     )
     replay_parser.add_argument("--json", type=_path, required=True)
+
+    mutation = commands.add_parser("mutate", help="compare selected/full changed-region mutants")
+    mutation.add_argument("--repo", type=_path, required=True)
+    mutation.add_argument("--base", required=True)
+    mutation.add_argument("--head", required=True)
+    mutation.add_argument("--coverage", type=_path)
+    mutation.add_argument("--runtime", type=_path)
+    mutation.add_argument(
+        "--mode", choices=("conservative", "balanced", "aggressive"), default="conservative"
+    )
+    mutation.add_argument("--seed", type=int, default=17)
+    mutation.add_argument("--max-mutants", type=int, default=DEFAULT_MAX_MUTANTS)
+    mutation.add_argument(
+        "--timeout", type=int, default=30, help="seconds per baseline/mutant suite"
+    )
+    mutation.add_argument("--cache-file", type=_path)
+    mutation.add_argument("--no-cache", action="store_true")
+    mutation.add_argument("--json", type=_path, required=True)
     return parser
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.command == "mutate":
+        mutation_report = mutate(
+            args.repo,
+            args.base,
+            args.head,
+            args.coverage,
+            args.runtime,
+            args.mode,
+            seed=args.seed,
+            max_mutants=args.max_mutants,
+            timeout_seconds=args.timeout,
+            use_cache=not args.no_cache,
+            cache_file=args.cache_file,
+        )
+        write_mutation_report(mutation_report, args.json)
+        summary = mutation_report.execution.summary
+        print(
+            f"sampled={summary.generation.sampled}; "
+            f"selected={summary.suites['selected'].killed}/"
+            f"{summary.suites['selected'].score_denominator} killed/scored; "
+            f"full={summary.suites['full'].killed}/"
+            f"{summary.suites['full'].score_denominator} killed/scored; "
+            f"paired_excluded={summary.comparison.excluded}; "
+            f"fallback={mutation_report.analysis.selection.fallback.value}"
+        )
+        return 0
     if args.command == "coverage" and args.coverage_command == "collect":
         pytest_args = args.pytest_args
         if pytest_args[:1] == ["--"]:

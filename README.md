@@ -128,10 +128,39 @@ unsupported normalization. Timeouts and abnormal worker exits are reported as di
 code still executes locally: process/filesystem separation and environment sanitization are not a
 security sandbox, so only trusted, side-effect-controlled code should be replayed.
 
-## Internal mutation experiment reports
+## Bounded mutation experiments
 
-Mutation generation and execution remain internal Python APIs. The execution report includes an
-explicit `summary` for bounded changed-region experiments:
+Compare analysis-selected tests with the full pytest suite against sampled mutations of exact
+changed head regions:
+
+```bash
+blastradius mutate \
+  --repo /path/to/repo --base BASE_SHA --head HEAD_SHA \
+  --coverage /tmp/base-coverage.json --mode conservative \
+  --seed 17 --max-mutants 20 --timeout 30 --json mutation.json
+```
+
+Use the target repository's compatible Python environment with pytest installed. The command
+generates mutants, analyzes the same immutable revision pair, and runs separate clean-head
+baselines before executing mutants. The JSON contains `analysis` (revision identities, selection
+policy, reasons, uncovered/truncated obligations, warnings, and cache state) and `execution`
+(generation ledger, actual suite selectors, baselines, individual outcomes, limits, environment,
+warnings, and score denominators). `--runtime`, `--cache-file`, and `--no-cache` work as in analysis.
+
+Missing coverage or another full-suite fallback uses default pytest discovery for **both** suites,
+honoring the head revision's pytest configuration, rather than treating known profile tests as the
+entire suite. This is recorded as `execution.selected_full_suite=true`; empty selector lists then
+mean default discovery. Without fallback, an empty selected list stays empty and is inconclusive.
+Full-suite discovery always uses the archived head. Dirty working-tree code is not executed.
+
+The deterministic seed defaults to 17; `--max-mutants` defaults to 100 (range 1–10000).
+`--timeout` defaults to 30 seconds per baseline or mutant suite (range 1–1800), not a total
+experiment deadline. Up to two baselines and two suite executions per sampled mutant may run.
+Start with a small cap. Exit status 0 means the report was written; inspect baseline statuses,
+exclusions, and denominators to assess the experiment. Invalid inputs produce status 2.
+Target code executes locally; use only trusted, side-effect-controlled repositories.
+
+The execution report includes an explicit `summary` for bounded changed-region experiments:
 
 - `generation.generated` counts unique candidate transformations before compilation;
   `syntax_rejected` counts compile failures, and `valid` counts syntax-valid candidates.
@@ -168,10 +197,10 @@ reports without the count ledger must be regenerated; generator and runner versi
 - Conservative selection, changed-test inclusion, uncovered-code fallback, stable JSON, and Markdown.
 - Representative-workload call counts labelled as such; absence never removes static possibilities.
 - Bounded JSON differential replay against actual base/head snapshots with explicit outcome classes.
-- Internal deterministic, syntax-validated mutant specifications restricted to exact changed regions;
-  internal matched selected/full pytest runners with clean-head baselines and explicit failure,
+- Deterministic, syntax-validated mutant specifications restricted to exact changed regions;
+  matched selected/full pytest runners with clean-head baselines and explicit failure,
   infrastructure, timeout, and inconclusive outcomes; explicit generation and score denominators
-  with paired outcome comparisons. The mutation CLI is not exposed yet.
+  with paired outcome comparisons and a public CLI retaining revision and selection provenance.
 - A transparent five-component risk model with visible inputs, weights, contributions, and warnings.
 
 ## Measured limitations
@@ -183,10 +212,9 @@ reports without the count ledger must be regenerated; generator and runner versi
   obligations are uncovered, but “conservative” does not mean formally safe.
 - Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and
   counts, not arguments, and makes no low-overhead claim.
-- Replay and persistent caching were added after v0.1.0. Mutation generation, isolated execution,
-  and denominator reporting are internal APIs; a public mutation CLI, HTML, benchmark campaigns,
-  and GitHub PR reporting are not implemented yet.
-- Internal mutation runs use the current interpreter's dependencies with pytest plugin autoload
+- Replay, persistent caching, and the bounded mutation CLI were added after v0.1.0. HTML,
+  benchmark campaigns, and GitHub PR reporting are not implemented yet.
+- Mutation runs use the current interpreter's dependencies with pytest plugin autoload
   disabled. Each suite must pass on the immutable clean head before its mutants execute, with the
   same timeout and environment policy. A kill requires pytest test-phase failure; collection errors
   are infrastructure failures, and timeouts, empty/skipped-only suites, or changed passing test sets

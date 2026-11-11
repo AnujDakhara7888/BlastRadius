@@ -345,6 +345,15 @@ class MutationExecutionReport:
     environment: dict[str, str]
     limits: dict[str, int]
     warnings: list[str]
+    selected_full_suite: bool = False
+
+
+@dataclass(slots=True)
+class MutationWorkflowReport:
+    schema_version: str
+    tool_version: str
+    analysis: AnalysisReport
+    execution: MutationExecutionReport
 
 
 def to_primitive(value: Any) -> Any:
