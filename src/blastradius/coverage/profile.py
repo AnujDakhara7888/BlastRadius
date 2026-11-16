@@ -44,6 +44,10 @@ def collect_profile(
     data_file = output.with_suffix(output.suffix + ".coverage")
     env = dict(os.environ)
     env["COVERAGE_FILE"] = str(data_file.resolve())
+    # pytest-cov switches contexts through the API, too late for coverage to choose
+    # a compatible core itself. sysmon (the Python 3.14 default) drops repeat hits.
+    # ctrace supports per-test contexts and falls back to pytrace if unavailable.
+    env["COVERAGE_CORE"] = "ctrace"
     command = [
         os.environ.get("PYTHON", sys.executable),
         "-m",
