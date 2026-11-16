@@ -235,6 +235,7 @@ def run_mutants(
     *,
     full_suite: Sequence[str] = (),
     timeout_seconds: int = 30,
+    selected_full_suite: bool = False,
 ) -> MutationExecutionReport:
     """Run each suite only after its own unmodified head baseline passes.
 
@@ -245,6 +246,8 @@ def run_mutants(
         raise BlastRadiusError("mutation timeout must be between 1 and 1800 seconds")
     selected = _selectors(selected_tests)
     full = _selectors(full_suite)
+    if selected_full_suite and selected != full:
+        raise BlastRadiusError("full-suite fallback requires identical selected/full selectors")
     if (
         generation.schema_version != SCHEMA_VERSION
         or generation.generator_version != GENERATOR_VERSION
@@ -290,7 +293,7 @@ def run_mutants(
                 ) from exc
         suites = {"selected": selected, "full": full}
         for suite, selectors in suites.items():
-            if suite == "selected" and not selectors:
+            if suite == "selected" and not selectors and not selected_full_suite:
                 baselines[suite] = SuiteExecution(
                     SuiteStatus.NO_TESTS, None, 0, 0, 0, 0, 0, "selected suite is empty"
                 )
@@ -353,6 +356,7 @@ def run_mutants(
             "Paired comparison excludes any mutant without conclusive outcomes in both suites.",
             "Sampled changed-region mutants do not estimate a whole-project mutation score.",
         ],
+        selected_full_suite,
     )
 
 

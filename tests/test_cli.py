@@ -7,7 +7,7 @@ def test_help_exposes_only_implemented_top_level_commands() -> None:
     assert "coverage" in help_text
     assert "trace" in help_text
     assert "replay" in help_text
-    assert "mutate" not in help_text
+    assert "mutate" in help_text
 
 
 def test_analyze_help_exposes_cache_control() -> None:
