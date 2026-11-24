@@ -22,6 +22,12 @@ blastradius --help
 
 The target repository must collect coverage in its own compatible Python environment. Installing
 BlastRadius there adds `coverage`; its test environment must also provide `pytest` and `pytest-cov`.
+Collection selects coverage's `ctrace` core (with its `pytrace` fallback) to retain per-test
+contexts, overriding `COVERAGE_CORE`. The Python 3.14 default `sysmon` core loses context data.
+Collection fixes pytest's root and conftest boundary to the target repository and explicitly uses
+its root pytest configuration (or a temporary empty configuration when absent). Ancestor project
+configuration is excluded, so nested checkouts retain repository-relative test node IDs. Keep
+collection configuration at the target root; additional pytest arguments still select tests.
 
 Run the self-contained demo after installation:
 
@@ -186,6 +192,42 @@ with no full-suite kills. Every sampled mutant retains both outcomes and exclusi
 whole-project mutation score or evidence that survivors are equivalent. Old internal generation
 reports without the count ledger must be regenerated; generator and runner versions are now `v2`.
 
+## Synthetic benchmark harness
+
+With the development dependencies installed, run one bounded campaign into a **new** directory:
+
+```bash
+python -m blastradius.benchmark \
+  --output .local/benchmark-first --repetitions 1 --max-mutants 3 --seed 17
+```
+
+The harness creates an explicitly synthetic two-commit fixture in that directory with real run
+dates, collects actual base-revision pytest coverage, and retains the fixture and all raw JSON.
+It analyzes the same pinned revisions with an empty static cache and then that populated cache,
+checks that report semantics match, and executes selected/full clean-head baselines and sampled
+mutants. Each repetition uses a fresh SQLite cache. The default aggressive policy can select one
+of two coverage-equivalent tests with different assertions; an unrelated third test stays outside
+that selection. Use `--mode conservative` or `--mode balanced` to compare policies in separate
+campaign directories.
+
+`summary.json` records fixture content hashes, revision SHAs, tool/Python/pytest/coverage/platform
+versions, parameters, UTC timestamps, raw wall-clock timings, selection counts, generation counts,
+score denominators, exclusions, and relative paths to cold/warm analysis and execution reports.
+The original coverage and generation reports are retained alongside it. Repetitions are limited
+to 1–3, mutant caps to 1–5, and `--timeout` to 1–30 seconds per suite (default 10). Coverage
+collection has its separate existing 1800-second limit. These are per-stage limits, not a campaign
+deadline. Existing directories are rejected without overwriting evidence. Exit status 0 requires
+complete expected fixture coverage and full-suite identities, matching analysis semantics,
+observed cache miss/hit states, and passing selected/full baselines;
+status 1 marks invalid evidence, and status 2 reports an invocation or execution error. Interrupted
+or failed campaigns retain an `incomplete` summary when possible. Inspect individual mutation
+outcomes and exclusions even for a completed campaign.
+
+This is one tiny synthetic fixture, not a representative project benchmark. Cold/warm describe
+only the static SQLite cache; filesystem and interpreter caches are uncontrolled. Timings include
+local process overhead and carry no speedup, project-wide mutation-score, or safety claim. The
+fixture commits live only in the retained disposable repository, with no remote configured.
+
 ## Implemented scope
 
 - Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.
@@ -213,7 +255,7 @@ reports without the count ledger must be regenerated; generator and runner versi
 - Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and
   counts, not arguments, and makes no low-overhead claim.
 - Replay, persistent caching, and the bounded mutation CLI were added after v0.1.0. HTML,
-  benchmark campaigns, and GitHub PR reporting are not implemented yet.
+  representative benchmark campaigns, and GitHub PR reporting are not implemented yet.
 - Mutation runs use the current interpreter's dependencies with pytest plugin autoload
   disabled. Each suite must pass on the immutable clean head before its mutants execute, with the
   same timeout and environment policy. A kill requires pytest test-phase failure; collection errors
