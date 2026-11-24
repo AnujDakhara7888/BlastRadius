@@ -24,6 +24,10 @@ The target repository must collect coverage in its own compatible Python environ
 BlastRadius there adds `coverage`; its test environment must also provide `pytest` and `pytest-cov`.
 Collection selects coverage's `ctrace` core (with its `pytrace` fallback) to retain per-test
 contexts, overriding `COVERAGE_CORE`. The Python 3.14 default `sysmon` core loses context data.
+Collection fixes pytest's root and conftest boundary to the target repository and explicitly uses
+its root pytest configuration (or a temporary empty configuration when absent). Ancestor project
+configuration is excluded, so nested checkouts retain repository-relative test node IDs. Keep
+collection configuration at the target root; additional pytest arguments still select tests.
 
 Run the self-contained demo after installation:
 
