@@ -9,7 +9,9 @@ from pathlib import Path
 from blastradius import __version__
 from blastradius.coverage.profile import collect_profile
 from blastradius.errors import BlastRadiusError
+from blastradius.github_artifacts import write_github_artifacts
 from blastradius.impact.analyze import analyze
+from blastradius.report.html import write_html
 from blastradius.report.render import write_json, write_markdown
 from blastradius.runtime.profile import collect_runtime_profile
 from blastradius.validate.mutate import DEFAULT_MAX_MUTANTS
@@ -40,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze_parser.add_argument("--json", type=_path, required=True)
     analyze_parser.add_argument("--markdown", type=_path, required=True)
+    analyze_parser.add_argument("--html", type=_path, help="write a standalone escaped HTML report")
     analyze_parser.add_argument(
         "--cache-file",
         type=_path,
@@ -47,6 +50,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze_parser.add_argument(
         "--no-cache", action="store_true", help="disable persistent static-index caching"
+    )
+
+    artifacts = commands.add_parser(
+        "github-artifacts", help="analyze a local GitHub PR event without executing target code"
+    )
+    artifacts.add_argument("--repo", type=_path, required=True)
+    artifacts.add_argument("--event", type=_path, required=True, help="pull_request event JSON")
+    artifacts.add_argument("--output", type=_path, required=True, help="new artifact directory")
+    artifacts.add_argument("--coverage", type=_path)
+    artifacts.add_argument("--runtime", type=_path)
+    artifacts.add_argument(
+        "--mode", choices=("conservative", "balanced", "aggressive"), default="conservative"
     )
 
     coverage_parser = commands.add_parser("coverage", help="per-test coverage profiles")
@@ -97,6 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.command == "github-artifacts":
+        write_github_artifacts(
+            args.repo, args.event, args.output, args.coverage, args.runtime, args.mode
+        )
+        print(f"wrote read-only PR analysis artifacts: {args.output}")
+        return 0
     if args.command == "mutate":
         mutation_report = mutate(
             args.repo,
@@ -168,6 +189,8 @@ def run(args: argparse.Namespace) -> int:
         )
         write_json(analysis_report, args.json)
         write_markdown(analysis_report, args.markdown)
+        if args.html is not None:
+            write_html(analysis_report, args.html)
         print(
             f"selected {len(analysis_report.selection.selected_tests)}/"
             f"{len(analysis_report.selection.available_tests)} known tests; "

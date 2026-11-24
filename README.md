@@ -65,6 +65,10 @@ blastradius analyze \
   --mode conservative --json report.json --markdown report.md
 ```
 
+Add `--html report.html` for a standalone HTML report with escaped repository text, explicit
+fallback/uncertainty, risk components, and the complete analysis JSON. It has no scripts, remote
+assets, or repository-supplied links. JSON and Markdown remain the default analysis outputs.
+
 Omit `--runtime` when no representative workload exists. Omit `--coverage` only to obtain an
 explicit conservative full-suite fallback report; missing evidence never silently excludes code.
 
@@ -228,6 +232,47 @@ only the static SQLite cache; filesystem and interpreter caches are uncontrolled
 local process overhead and carry no speedup, project-wide mutation-score, or safety claim. The
 fixture commits live only in the retained disposable repository, with no remote configured.
 
+## Read-only GitHub PR artifacts
+
+Given a local `pull_request` event and a clone containing both event commits:
+
+```bash
+blastradius github-artifacts \
+  --repo /path/to/clone --event /path/to/pull-request-event.json \
+  --output /tmp/new-pr-artifacts
+```
+
+This reads the event's exact `pull_request.base.sha` and `pull_request.head.sha`, verifies the
+base repository against the clone's GitHub.com origin, and writes `analysis.json`, `analysis.md`,
+`analysis.html`, and `manifest.json` to a **new** directory. The manifest binds the event bytes and
+each report with SHA-256 and records immutable commit/tree identities. The command accepts only
+full commit SHAs; missing Git objects, unsupported/malformed events, or an existing output
+directory are errors. HTTPS and standard SSH GitHub.com origins are supported; GitHub Enterprise
+origins are not yet supported. Fork PRs use the base repository's clone with both objects present.
+
+The command performs static analysis without checking out revisions, importing target modules,
+installing target dependencies, running tests, writing a Git cache, or making GitHub API calls.
+It accepts optional `--coverage`, `--runtime`, and `--mode` arguments as in `analyze`; profiles
+must match the base identity. Without coverage it explicitly requires full-suite fallback.
+Known-test counts are not actual full-suite discovery. Exit status 0 means artifacts were written,
+not that the PR is safe or its tests passed. A failed write may leave a partial directory; retain
+it and retry into a new directory. An event hash binds the input; it does not authenticate it.
+
+The [workflow example](examples/github-artifacts.yml) analyzes this repository with `contents:
+read`, a separate trusted-base tool install, a target checkout containing the merge parents, and
+artifact upload. Target PR code is never installed or executed. Copy it into `.github/workflows/`
+only after the trusted base contains this command; it is an example, not an enabled or hosted-
+verified workflow. The current v0.1.0 release lacks this command. Keep the tool install separate
+when adapting it to other target repositories. This integration publishes artifacts only, with
+no comments, check-run updates, or write token permissions.
+
+GitHub's [pull-request event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
+explains why `GITHUB_SHA` is a merge commit rather than the PR head. The example uses GitHub's
+[permission settings](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)
+and [artifact action](https://github.com/actions/upload-artifact). Action revisions are pinned;
+review pins before adopting the example. Hosted artifact upload and fresh-install reproduction
+remain release gates; local artifact generation alone does not establish them.
+
 ## Implemented scope
 
 - Immutable commit/tree identity and two-sided Git hunk parsing, including adds/deletes/renames.
@@ -254,8 +299,9 @@ fixture commits live only in the retained disposable repository, with no remote 
   obligations are uncovered, but “conservative” does not mean formally safe.
 - Runtime tracing uses `sys.setprofile` in-process for this baseline. It records scoped call edges and
   counts, not arguments, and makes no low-overhead claim.
-- Replay, persistent caching, and the bounded mutation CLI were added after v0.1.0. HTML,
-  representative benchmark campaigns, and GitHub PR reporting are not implemented yet.
+- Replay, persistent caching, bounded mutation, escaped HTML, and local GitHub PR artifacts were
+  added after v0.1.0. Representative benchmark campaigns, hosted artifact-workflow validation,
+  fresh-install reproduction, and final release gates remain incomplete.
 - Mutation runs use the current interpreter's dependencies with pytest plugin autoload
   disabled. Each suite must pass on the immutable clean head before its mutants execute, with the
   same timeout and environment policy. A kill requires pytest test-phase failure; collection errors

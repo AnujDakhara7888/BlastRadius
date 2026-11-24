@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from html import escape
 from pathlib import Path
 
 from blastradius.models import AnalysisReport, to_primitive
@@ -14,23 +16,32 @@ def write_json(report: AnalysisReport, output: Path) -> None:
 
 
 def _escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|")
+    escaped = escape(value, quote=False).replace("\r", " ").replace("\n", " ")
+    return re.sub(r"([\\`|\[\]()*_!#~])", r"\\\1", escaped)
+
+
+def _code(value: str, *, table: bool = False) -> str:
+    value = value.replace("\r", " ").replace("\n", " ")
+    if table:
+        value = value.replace("|", "\\|")
+    delimiter = "`" * (max((len(run) for run in re.findall(r"`+", value)), default=0) + 1)
+    return f"{delimiter} {value} {delimiter}"
 
 
 def write_markdown(report: AnalysisReport, output: Path) -> None:
     lines = [
         "# BlastRadius analysis",
         "",
-        f"- Base: `{report.base.sha}`",
-        f"- Head: `{report.head.sha}`",
-        f"- Mode: `{report.mode}`",
-        f"- Risk: **{report.risk.score:.2f}/100** ({report.risk.label})",
+        f"- Base: {_code(report.base.sha)}",
+        f"- Head: {_code(report.head.sha)}",
+        f"- Mode: {_code(report.mode)}",
+        f"- Risk: **{report.risk.score:.2f}/100** ({_escape(report.risk.label)})",
         f"- Selected known tests: **{len(report.selection.selected_tests)} / "
         f"{len(report.selection.available_tests)}**",
         f"- Fallback: `{report.selection.fallback.value}`",
         f"- Uncovered obligations: **{len(report.selection.uncovered_obligations)}**",
         f"- Truncated obligations: **{len(report.selection.truncated_obligations)}**",
-        f"- Cache state: `{report.cache_state}`",
+        f"- Cache state: {_code(report.cache_state)}",
         "",
         "## Changed symbols",
         "",
@@ -47,7 +58,7 @@ def write_markdown(report: AnalysisReport, output: Path) -> None:
             assert symbol is not None
             changed_lines = change.head_lines or change.base_lines
             lines.append(
-                f"| {change.change.value} | `{_escape(symbol.id.key)}` | "
+                f"| {change.change.value} | {_code(symbol.id.key, table=True)} | "
                 f"{_escape(', '.join(map(str, changed_lines)) or 'structural')} | "
                 f"{change.match_confidence:.2f} | {_escape(change.ambiguity or '')} |"
             )
@@ -56,7 +67,7 @@ def write_markdown(report: AnalysisReport, output: Path) -> None:
     lines.extend(["", "## Affected dependents", ""])
     if report.impact:
         for finding in report.impact:
-            path = " → ".join(f"`{_escape(item)}`" for item in finding.dependency_path)
+            path = " → ".join(_code(item) for item in finding.dependency_path)
             lines.append(f"- {path} (confidence {finding.confidence:.2f})")
     else:
         lines.append("No dependent symbols were found by the supported static analysis.")
@@ -64,7 +75,7 @@ def write_markdown(report: AnalysisReport, output: Path) -> None:
     if report.selection.selected_tests:
         for test_id in report.selection.selected_tests:
             reasons = "; ".join(report.selection.reasons.get(test_id, ["selected by policy"]))
-            lines.append(f"- `{_escape(test_id)}` — {_escape(reasons)}")
+            lines.append(f"- {_code(test_id)} — {_escape(reasons)}")
     else:
         lines.append("No explicit subset is available. Follow the reported fallback policy.")
     lines.extend(
